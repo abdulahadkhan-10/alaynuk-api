@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Outlet" ADD COLUMN IF NOT EXISTS "kitchenMode" TEXT DEFAULT 'HYBRID';

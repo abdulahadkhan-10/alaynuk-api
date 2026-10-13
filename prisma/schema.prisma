@@ -1,0 +1,1050 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  BUSINESS_OWNER
+  MANAGER
+  STAFF
+  KITCHEN
+  SUPPLIER
+}
+
+enum SupplierType {
+  ONLINE
+  OFFLINE
+}
+
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ShiftAssignmentStatus {
+  ASSIGNED
+  ABSENT
+  PRESENT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EARLY_DEPARTURE
+}
+
+enum LeaveStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum SwapStatus {
+  REQUESTED // offered by the employee giving up the shift
+  ACCEPTED  // the colleague taking the shift agreed; waiting for manager approval
+  APPROVED
+  REJECTED
+}
+
+enum DietaryType {
+  VEG
+  NON_VEG
+  VEGAN
+}
+
+enum StockReason {
+  SALE
+  WASTE
+  PURCHASE
+  ADJUSTMENT
+}
+
+enum POStatus {
+  DRAFT
+  SENT
+  PACKING
+  PARTIALLY_DISPATCHED
+  DISPATCHED
+  OUT_OF_STOCK
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum AlertType {
+  LOW_STOCK
+  EXPIRY
+}
+
+enum AlertStatus {
+  OPEN
+  RESOLVED
+}
+
+enum OrderSource {
+  TABLE
+  COUNTER
+  QR
+  DELIVERY
+}
+
+enum OrderStatus {
+  SENT_TO_KITCHEN
+  PREPARING
+  READY
+  SERVED
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  CASH
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum WasteReasonType {
+  SPOILAGE
+  OVER_PREP
+  RETURN
+  ERROR
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum GstRegistrationType {
+  REGULAR      // Charges CGST/SGST — "Tax Invoice"
+  COMPOSITION  // Composition scheme — cannot collect tax; "Bill of Supply"
+  UNREGISTERED // Below GST threshold — no GST on bills
+}
+
+enum TableType {
+  AC
+  NON_AC
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  businessId   String?       @db.Uuid
+  email        String        @unique
+  passwordHash String
+  name         String
+  role         Role
+  phoneNo      String
+  isActive     Boolean       @default(true) // false = login blocked (e.g. employee set INACTIVE or removed)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  
+  business     Business?     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessOwner BusinessOwner?
+  outlets      UserOutlet[]
+  refreshTokens RefreshToken[]
+  employees    Employee[]
+  supplier     Supplier?     @relation("SupplierUser")
+  notifications Notification[]
+  createdCoupons Coupon[]      @relation("AdminCreatedCoupons")
+}
+
+model Business {
+  id             String        @id @default(uuid()) @db.Uuid
+  name           String
+  locationsCount String?
+  businessType   String?
+  contactDetail  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  outlets      Outlet[]
+  users        User[]
+  owners       BusinessOwner[]
+  subscription Subscription?
+  outletSubscriptions OutletSubscription[]
+  subscriptionPayments SubscriptionPayment[]
+  notifications Notification[]
+}
+
+model BusinessOwner {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @unique @db.Uuid
+  businessId String    @db.Uuid
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+  INACTIVE
+}
+
+enum OutletSubscriptionStatus {
+  ACTIVE
+  PENDING_PAYMENT
+  EXPIRED
+  CANCELED
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  USER_DROPPED
+}
+
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  businessId           String             @unique @db.Uuid
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(ACTIVE)
+  planId               String             @default("BASIC")
+  trialStart           DateTime?
+  trialEnd             DateTime?
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  business             Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model OutletSubscription {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  outletId           String                   @unique @db.Uuid
+  businessId         String                   @db.Uuid
+  status             OutletSubscriptionStatus @default(PENDING_PAYMENT)
+  planCode           String                   @default("MONTHLY_STANDARD")
+  planName           String                   @default("Monthly Pro Plan")
+  monthlyFeePaise    Int                      @default(199900)
+  taxRatePercent     Decimal                  @default(18.0) @db.Decimal(5, 2)
+  currency           String                   @default("INR")
+  currentPeriodStart DateTime                 @default(now())
+  currentPeriodEnd   DateTime
+  autoRenew          Boolean                  @default(true)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  outlet             Outlet                   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  business           Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payments           SubscriptionPayment[]
+
+  @@index([businessId])
+  @@index([status])
+}
+
+model SubscriptionPayment {
+  id                   String                    @id @default(uuid()) @db.Uuid
+  outletSubscriptionId String?                   @db.Uuid
+  outletId             String                    @db.Uuid
+  businessId           String                    @db.Uuid
+  cfOrderId            String                    @unique
+  cfPaymentId          String?
+  amountPaise          Int
+  taxAmountPaise       Int                       @default(0)
+  currency             String                    @default("INR")
+  paymentStatus        SubscriptionPaymentStatus @default(PENDING)
+  paymentMethod        String?                   // e.g. "UPI", "CARD", "NETBANKING"
+  paymentSessionId     String?
+  cfSignature          String?
+  paidAt               DateTime?
+  rawWebhookPayload    Json?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  couponId             String?                   @db.Uuid
+  couponCode           String?
+  discountAmountPaise  Int                       @default(0)
+  billingMonths        Int                       @default(1)
+
+  coupon               Coupon?                   @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  outletSubscription   OutletSubscription?       @relation(fields: [outletSubscriptionId], references: [id], onDelete: SetNull)
+  outlet               Outlet                    @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  business             Business                  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+  @@index([businessId])
+  @@index([paymentStatus])
+}
+
+model Outlet {
+  id               String        @id @default(uuid()) @db.Uuid
+  businessId       String        @db.Uuid
+  name             String
+  address          String
+  city             String
+  state            String
+  country          String
+  cgstRateDecimal        Decimal       @default(2.5) @db.Decimal(5, 2)
+  sgstRateDecimal        Decimal       @default(2.5) @db.Decimal(5, 2)
+  serviceTaxRateDecimal  Decimal       @default(0.0) @db.Decimal(5, 2) // Service CHARGE % (dine-in only) — historical column name
+  gstRegistrationType    GstRegistrationType @default(REGULAR) // Composition / Unregistered businesses must not charge GST
+  operatingDays    String?       // JSON array of operating days, e.g. ["MONDAY", "TUESDAY", ...]
+  openingTime      String?       @default("10:00") // Format "HH:MM" e.g. "10:00"
+  closingTime      String?       @default("22:00") // Format "HH:MM" e.g. "22:00"
+  phone            String?
+  gstin            String?
+  receiptTagline   String?
+  receiptFooter    String?
+  upiId            String?
+  latitude         Float?
+  longitude        Float?
+  geofenceRadius   Int?          @default(100)
+  earlyBufferMinutes Int         @default(30) // How early before shift start staff may clock in
+  lateGraceMinutes   Int         @default(30) // Minutes after shift start before a clock-in is marked LATE
+  kitchenMode      String?       @default("HYBRID") // "KOT", "KDS", "HYBRID"
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+
+  business         Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  subscription     OutletSubscription?
+  subscriptionPayments SubscriptionPayment[]
+  users            UserOutlet[]
+  employees        Employee[]
+  shifts           Shift[]
+  shiftAssignments ShiftAssignment[]
+  attendance       Attendance[]
+  leaveRequests    LeaveRequest[]
+  shiftSwapRequests ShiftSwapRequest[]
+  holidays         OutletHoliday[]
+  rosters          EmployeeRoster[]
+  items            Item[]
+  stockBatches     StockBatch[]
+  stockLedgerEntries StockLedgerEntry[]
+  suppliers        Supplier[]
+  purchaseOrders   PurchaseOrder[]
+  stockAlerts      StockAlert[]
+  menuCategories   MenuCategory[]
+  menuItems        MenuItem[]
+  menuItemOutlets  MenuItemOutlet[]
+  tables           Table[]
+  tableTokens      TableToken[]
+  orders           Order[]
+  wasteLogs        WasteLog[]
+  dailySalesSummaries DailySalesSummary[]
+  feedbacks        Feedback[]
+  staffQueries     StaffQuery[]
+  tickets          Ticket[]
+  notifications    Notification[]
+}
+
+model UserOutlet {
+  userId     String   @db.Uuid
+  outletId   String   @db.Uuid
+  assignedAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@id([userId, outletId])
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  tokenHash  String   @unique
+  userId     String   @db.Uuid
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Employee {
+  id          String         @id @default(uuid()) @db.Uuid
+  outletId    String         @db.Uuid
+  userId      String?        @db.Uuid
+  email       String?
+  name        String
+  phone       String
+  role        Role
+  joiningDate DateTime
+  status      EmployeeStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  outlet            Outlet             @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  user              User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  documents         EmployeeDocument[]
+  shiftAssignments  ShiftAssignment[]
+  attendance        Attendance[]
+  leaveRequests     LeaveRequest[]
+  swapFromRequests  ShiftSwapRequest[] @relation("SwapFrom")
+  swapToRequests    ShiftSwapRequest[] @relation("SwapTo")
+  performanceNotes  PerformanceNote[]  @relation("PerformanceEmployee")
+  writtenNotes      PerformanceNote[]  @relation("PerformanceWriter")
+  staffQueries      StaffQuery[]
+  roster            EmployeeRoster[]
+  assignedTables    Table[]            @relation("StaffAssignedTables")
+
+  @@index([outletId])
+}
+
+model EmployeeDocument {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @db.Uuid
+  name       String
+  fileUrl    String
+  mimeType   String
+  sizeBytes  Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model Shift {
+  id        String    @id @default(uuid()) @db.Uuid
+  outletId  String    @db.Uuid
+  name      String
+  startTime String    // Format: "HH:MM"
+  endTime   String    // Format: "HH:MM"
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  outlet      Outlet            @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  assignments ShiftAssignment[]
+  swapRequests ShiftSwapRequest[]
+  rosters     EmployeeRoster[]
+
+  @@index([outletId])
+}
+
+model OutletHoliday {
+  id        String   @id @default(uuid()) @db.Uuid
+  outletId  String   @db.Uuid
+  name      String
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([outletId, date])
+  @@index([outletId])
+}
+
+model EmployeeRoster {
+  id         String    @id @default(uuid()) @db.Uuid
+  employeeId String    @db.Uuid
+  dayOfWeek  DayOfWeek
+  shiftId    String?   @db.Uuid
+  outletId   String    @db.Uuid
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift    Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, dayOfWeek])
+  @@index([outletId])
+}
+
+model ShiftAssignment {
+  id         String                @id @default(uuid()) @db.Uuid
+  employeeId String                @db.Uuid
+  shiftId    String                @db.Uuid
+  date       DateTime              @db.Date
+  status     ShiftAssignmentStatus @default(ASSIGNED)
+  outletId   String                @db.Uuid
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift    Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, shiftId, date])
+  @@index([outletId])
+}
+
+model Attendance {
+  id           String           @id @default(uuid()) @db.Uuid
+  employeeId   String           @db.Uuid
+  date         DateTime         @db.Date
+  checkInTime  DateTime
+  checkOutTime DateTime?
+  status       AttendanceStatus @default(PRESENT) // Summary: LATE > EARLY_DEPARTURE > PRESENT (see flags below)
+  isLate            Boolean     @default(false) // Arrived after shift start + grace
+  leftEarly         Boolean     @default(false) // Clocked out > 15 min before shift end (cleared if they come back the same day)
+  workedOnHoliday   Boolean     @default(false) // Clocked in on an outlet holiday (after confirming)
+  workedOnClosedDay Boolean     @default(false) // Clocked in on a non-operating day (after confirming)
+  extraShift        Boolean     @default(false) // Clocked in on their rostered weekly off (after confirming)
+  missedClockOut    Boolean     @default(false) // Forgot to clock out: no end time, 0 hours counted until a manager fixes it
+  editedById        String?     @db.Uuid        // Manager/owner who last corrected the times
+  editReason        String?
+  editedAt          DateTime?
+  outletId     String           @db.Uuid
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model LeaveRequest {
+  id            String      @id @default(uuid()) @db.Uuid
+  employeeId    String      @db.Uuid
+  startDate     DateTime    @db.Date
+  endDate       DateTime    @db.Date
+  reason        String
+  status        LeaveStatus @default(REQUESTED)
+  approvedById  String?     @db.Uuid // Manager or Owner User ID
+  outletId      String      @db.Uuid
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model ShiftSwapRequest {
+  id             String     @id @default(uuid()) @db.Uuid
+  fromEmployeeId String     @db.Uuid
+  toEmployeeId   String     @db.Uuid
+  shiftId        String     @db.Uuid
+  date           DateTime   @db.Date
+  status         SwapStatus @default(REQUESTED)
+  outletId       String     @db.Uuid
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  fromEmployee Employee @relation("SwapFrom", fields: [fromEmployeeId], references: [id], onDelete: Cascade)
+  toEmployee   Employee @relation("SwapTo", fields: [toEmployeeId], references: [id], onDelete: Cascade)
+  shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  outlet       Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model PerformanceNote {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @db.Uuid
+  writerId   String   @db.Uuid // Employee ID of the supervisor writing it
+  note       String
+  rating     Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation("PerformanceEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  writer   Employee @relation("PerformanceWriter", fields: [writerId], references: [id], onDelete: Cascade)
+}
+
+model Item {
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  sku              String
+  category         String
+  unit             String
+  reorderThreshold Decimal   @db.Decimal(12, 4)
+  unitCostPaise    Int
+  outletId         String    @db.Uuid
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  outlet             Outlet              @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  batches            StockBatch[]
+  ledgerEntries      StockLedgerEntry[]
+  recipes            Recipe[]
+  purchaseOrderItems PurchaseOrderItem[]
+  alerts             StockAlert[]
+
+  @@unique([outletId, sku])
+  @@index([outletId])
+}
+
+model StockBatch {
+  id            String    @id @default(uuid()) @db.Uuid
+  itemId        String    @db.Uuid
+  quantity      Decimal   @db.Decimal(12, 4)
+  expiryDate    DateTime
+  batchNumber   String
+  unitCostPaise Int
+  outletId      String    @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model StockLedgerEntry {
+  id          String      @id @default(uuid()) @db.Uuid
+  itemId      String      @db.Uuid
+  change      Decimal     @db.Decimal(12, 4)
+  reason      StockReason
+  referenceId String?     // e.g. PO ID, Order ID, WasteLog ID
+  outletId    String      @db.Uuid
+  createdAt   DateTime    @default(now())
+
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model Recipe {
+  menuItemId      String  @db.Uuid
+  itemId          String  @db.Uuid
+  quantityPerUnit Decimal @db.Decimal(12, 4)
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  item     Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([menuItemId, itemId])
+}
+
+model Supplier {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  contactPerson String
+  phone         String
+  email         String
+  address       String
+  category      String?
+  type          SupplierType @default(OFFLINE)
+  userId        String?      @unique @db.Uuid
+  outletId      String       @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  user           User?           @relation("SupplierUser", fields: [userId], references: [id], onDelete: SetNull)
+  outlet         Outlet          @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+
+  @@index([outletId])
+}
+
+model PurchaseOrder {
+  id                       String            @id @default(uuid()) @db.Uuid
+  supplierId               String            @db.Uuid
+  status                   POStatus          @default(DRAFT)
+  totalAmountPaise         Int
+  supplierNotes            String?
+  dispatchDate             DateTime?
+  expectedNextDeliveryDate DateTime?
+  closedReason             String?           // Why the PO was cancelled or closed short
+  closedAt                 DateTime?         // When it was cancelled / closed short
+  outletId                 String            @db.Uuid
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  deletedAt                DateTime?
+
+  supplier       Outlet            @relation(fields: [outletId], references: [id], onDelete: Cascade) // Note: references Outlet for authorization scopes
+  actualSupplier Supplier          @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  items          PurchaseOrderItem[]
+
+  @@index([outletId])
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id                 String   @id @default(uuid()) @db.Uuid
+  purchaseOrderId    String   @db.Uuid
+  itemId             String   @db.Uuid
+  orderedQuantity    Decimal  @db.Decimal(12, 4)
+  dispatchedQuantity Decimal  @default(0) @db.Decimal(12, 4)
+  receivedQuantity   Decimal  @default(0) @db.Decimal(12, 4)
+  damagedQuantity    Decimal  @default(0) @db.Decimal(12, 4)
+  unitCostPaise      Int
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+model StockAlert {
+  id        String      @id @default(uuid()) @db.Uuid
+  itemId    String      @db.Uuid
+  type      AlertType
+  message   String
+  status    AlertStatus @default(OPEN)
+  outletId  String      @db.Uuid
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model MenuCategory {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  description String
+  isActive    Boolean   @default(true)
+  outletId    String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  outlet    Outlet     @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  menuItems MenuItem[]
+
+  @@index([outletId])
+}
+
+model MenuItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  description String
+  imageUrl    String?
+  pricePaise  Int
+  categoryId  String    @db.Uuid
+  isVeg       Boolean      @default(true)
+  dietaryType DietaryType  @default(VEG)
+  isActive    Boolean   @default(true)
+  outletId    String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  category   MenuCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  outlet     Outlet?          @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  outlets    MenuItemOutlet[]
+  recipes    Recipe[]
+  orderItems OrderItem[]
+
+  @@index([outletId])
+}
+
+model MenuItemOutlet {
+  id         String   @id @default(uuid()) @db.Uuid
+  menuItemId String   @db.Uuid
+  outletId   String   @db.Uuid
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, outletId])
+  @@index([menuItemId])
+  @@index([outletId])
+}
+
+model Table {
+  id              String      @id @default(uuid()) @db.Uuid
+  tableNumber     Int
+  tableType       TableType   @default(NON_AC)
+  status          TableStatus @default(AVAILABLE)
+  outletId        String      @db.Uuid
+  assignedStaffId String?     @db.Uuid
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  outlet        Outlet      @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  assignedStaff Employee?   @relation("StaffAssignedTables", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  tokens        TableToken[]
+
+  @@unique([outletId, tableNumber])
+  @@index([outletId])
+  @@index([assignedStaffId])
+}
+
+model TableToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  tableNumber Int
+  token       String   @unique
+  expiresAt   DateTime
+  outletId    String   @db.Uuid
+  tableId     String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  table  Table? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+
+  @@index([outletId])
+}
+
+model Order {
+  id            String      @id @default(uuid()) @db.Uuid
+  orderNumber   String?     @unique
+  tableNumber   Int?
+  source        OrderSource
+  status        OrderStatus @default(SENT_TO_KITCHEN)
+  subtotalPaise Int
+  cgstPaise       Int
+  sgstPaise       Int
+  serviceTaxPaise Int         @default(0) // Service CHARGE amount (dine-in, voluntary) — historical column name
+  taxPaise        Int                     // cgst + sgst + service charge (kept for compatibility)
+  totalPaise    Int
+  discountPaise   Int         @default(0)
+  roundOffPaise   Int         @default(0) // Total rounded to the nearest rupee
+  // Rates used for this bill (snapshot), so receipts never change when outlet settings change
+  cgstRate          Decimal?  @db.Decimal(5, 2)
+  sgstRate          Decimal?  @db.Decimal(5, 2)
+  serviceChargeRate Decimal?  @db.Decimal(5, 2)
+  // Service charge is voluntary: removed at the customer's request, with who/why recorded
+  serviceChargeWaived      Boolean @default(false)
+  serviceChargeWaivedById  String? @db.Uuid
+  serviceChargeWaiveReason String?
+  placedByName  String?
+  placedByRole  String?
+  customerName  String?
+  customerPhone String?
+  outletId      String      @db.Uuid
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  outlet         Outlet              @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  items          OrderItem[]
+  statusHistory  OrderStatusHistory[]
+  payments       Payment[]
+  feedbacks      Feedback[]
+
+  @@index([outletId])
+  @@index([outletId, status, deletedAt])
+}
+
+model OrderItem {
+  id             String      @id @default(uuid()) @db.Uuid
+  orderId        String      @db.Uuid
+  menuItemId     String      @db.Uuid
+  quantity       Int
+  unitPricePaise Int
+  subtotalPaise  Int
+  notes          String?
+  status         OrderStatus @default(SENT_TO_KITCHEN)
+  kotNo          Int         @default(1)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+}
+
+model OrderStatusHistory {
+  id          String      @id @default(uuid()) @db.Uuid
+  orderId     String      @db.Uuid
+  status      OrderStatus
+  changedById String?     @db.Uuid // User ID of the employee
+  comment     String?
+  createdAt   DateTime    @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id          String        @id @default(uuid()) @db.Uuid
+  orderId     String        @db.Uuid
+  amountPaise Int
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model WasteReason {
+  id          String          @id @default(uuid()) @db.Uuid
+  reason      WasteReasonType
+  description String
+  createdAt   DateTime        @default(now())
+}
+
+model WasteLog {
+  id                 String          @id @default(uuid()) @db.Uuid
+  itemId             String          @db.Uuid
+  quantity           Decimal         @db.Decimal(12, 4)
+  costAtLoggingPaise Int
+  reason             WasteReasonType
+  loggedById         String          @db.Uuid // User ID
+  outletId           String          @db.Uuid
+  createdAt          DateTime        @default(now())
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+}
+
+model DailySalesSummary {
+  id                String   @id @default(uuid()) @db.Uuid
+  date              DateTime @db.Date
+  grossSalesPaise   Int
+  cogsPaise         Int
+  grossProfitPaise  Int
+  orderCount        Int
+  itemBreakdownJson String   // JSON details: { [menuItemId]: quantity }
+  outletId          String   @db.Uuid
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([outletId, date])
+  @@index([outletId])
+}
+
+model Feedback {
+  id        String   @id @default(uuid()) @db.Uuid
+  outletId  String   @db.Uuid
+  orderId   String   @db.Uuid
+  rating    Int
+  comment   String
+  source    String   // e.g. "RECEIPT", "QR"
+  createdAt DateTime @default(now())
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model StaffQuery {
+  id          String   @id @default(uuid()) @db.Uuid
+  employeeId  String   @db.Uuid
+  category    String
+  description String
+  status      String   @default("OPEN")
+  outletId    String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId])
+}
+
+model Ticket {
+  id          String         @id @default(uuid()) @db.Uuid
+  title       String
+  description String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(NORMAL)
+  sourceTable String         // "Feedback" or "StaffQuery"
+  sourceId    String         @db.Uuid
+  outletId    String         @db.Uuid
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  outlet    Outlet          @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  histories TicketHistory[]
+
+  @@index([outletId])
+}
+
+model TicketHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  ticketId    String       @db.Uuid
+  status      TicketStatus
+  changedById String?      @db.Uuid // User ID of assignee/resolver
+  comment     String?
+  createdAt   DateTime     @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @db.Uuid
+  businessId String?  @db.Uuid
+  outletId   String?  @db.Uuid
+  role       Role?
+  title      String
+  message    String
+  type       String
+  entityType String?
+  entityId   String?
+  isRead     Boolean  @default(false)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  outlet   Outlet?   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([outletId])
+  @@index([businessId])
+  @@index([role])
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+model Coupon {
+  id            String       @id @default(uuid()) @db.Uuid
+  code          String       @unique
+  discountType  DiscountType @default(PERCENTAGE)
+  discountValue Decimal      @db.Decimal(10, 2)
+  isActive      Boolean      @default(true)
+  expiresAt     DateTime?
+  usageLimit    Int?
+  usageCount    Int          @default(0)
+  createdById   String?      @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  createdBy     User?        @relation("AdminCreatedCoupons", fields: [createdById], references: [id], onDelete: SetNull)
+  payments      SubscriptionPayment[]
+
+  @@index([code])
+  @@index([isActive])
+}
+

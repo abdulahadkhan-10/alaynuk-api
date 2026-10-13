@@ -1,0 +1,7 @@
+-- AlterEnum
+ALTER TYPE "AttendanceStatus" ADD VALUE 'EARLY_DEPARTURE';
+
+-- AlterTable
+ALTER TABLE "Outlet" ADD COLUMN "geofenceRadius" INTEGER DEFAULT 100,
+ADD COLUMN "latitude" DOUBLE PRECISION,
+ADD COLUMN "longitude" DOUBLE PRECISION;

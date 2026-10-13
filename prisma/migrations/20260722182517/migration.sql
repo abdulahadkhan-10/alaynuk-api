@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "OrderItem" ADD COLUMN     "kotNo" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN     "status" "OrderStatus" NOT NULL DEFAULT 'SENT_TO_KITCHEN';
